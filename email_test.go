@@ -1,56 +1,39 @@
 package types_test
 
 import (
-	"strings"
+	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/go-api-libs/types"
 	"github.com/go-json-experiment/json"
+	"github.com/go-json-experiment/json/jsontext"
 )
 
-type myStruct struct {
+type wrapEmail struct {
 	Email types.Email `json:"email,omitempty"`
 }
 
-type myStruct2 struct {
+type wrapPointerToEmail struct {
 	Email *types.Email `json:"email,omitempty"`
 }
 
 func TestEmail(t *testing.T) {
-	t.Parallel()
-
 	for _, tc := range []struct {
-		name      string
-		json      string
-		want      string
-		wantError string
+		name string
+		json string
+		want string
 	}{
-		{"empty", `{"email":""}`, "", ""},
-		{"fully empty", `{}`, "", ""},
-		{"valid", `{"email":"max@example.com"}`, "max@example.com", ""},
-		{
-			"invalid", `{"email":"foo"}`, "",
-			`json: cannot unmarshal Go value of type types.Email: invalid email: "foo"`,
-		},
-		{"invalid", `{"email":"foo`, "", `json: cannot unmarshal Go value of type types.Email: unexpected EOF`},
+		{"empty", `{"email":""}`, ""},
+		{"fully empty", `{}`, ""},
+		{"valid", `{"email":"max@example.com"}`, "max@example.com"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
 			t.Run("no pointer", func(t *testing.T) {
-				res := &myStruct{}
-				err := json.Unmarshal([]byte(tc.json), res)
-				if tc.wantError != "" {
-					if err == nil {
-						t.Fatal("expected error")
-					} else if got := err.Error(); strings.Replace(got,
-						// sometimes the error message is "unable to" and sometimes "cannot"
-						"unable to", "cannot", 1) != tc.wantError {
-						t.Fatalf("got: %q, want: %q", got, tc.wantError)
-					}
-					return
-				}
-				if err != nil {
+				res := &wrapEmail{}
+				if err := json.Unmarshal([]byte(tc.json), res); err != nil {
 					t.Fatal(err)
 				}
 
@@ -66,19 +49,8 @@ func TestEmail(t *testing.T) {
 			})
 
 			t.Run("pointer", func(t *testing.T) {
-				res := &myStruct2{}
-				err := json.Unmarshal([]byte(tc.json), res)
-				if tc.wantError != "" {
-					if err == nil {
-						t.Fatal("expected error")
-					} else if got := err.Error(); strings.Replace(got,
-						// sometimes the error message is "unable to" and sometimes "cannot"
-						"unable to", "cannot", 1) != tc.wantError {
-						t.Fatalf("got: %q, want: %v", got, tc.wantError)
-					}
-					return
-				}
-				if err != nil {
+				res := &wrapPointerToEmail{}
+				if err := json.Unmarshal([]byte(tc.json), res); err != nil {
 					t.Fatal(err)
 				}
 
@@ -95,4 +67,36 @@ func TestEmail(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestEmail_Errors(t *testing.T) {
+	emailType := reflect.TypeFor[types.Email]()
+
+	t.Run("invalid email", func(t *testing.T) {
+		body := []byte(`{"email":"foo"}`)
+		for _, out := range []any{&wrapEmail{}, &wrapPointerToEmail{}} {
+			semErr := &json.SemanticError{}
+			if err := json.Unmarshal(body, out); err == nil {
+				t.Fatal("expected error")
+			} else if !errors.As(err, &semErr) {
+				t.Fatalf("wanted: %T, got: %T", semErr, err)
+			} else if semErr.GoType != emailType {
+				t.Fatalf("wanted: %T, got: %T", emailType, semErr.GoType)
+			}
+		}
+	})
+
+	t.Run("unexpected EOF", func(t *testing.T) {
+		body := []byte(`{"email":"foo`)
+		for _, out := range []any{&wrapEmail{}, &wrapPointerToEmail{}} {
+			synErr := &jsontext.SyntacticError{}
+			if err := json.Unmarshal(body, out); err == nil {
+				t.Fatal("expected error")
+			} else if !errors.As(err, &synErr) {
+				t.Fatalf("wanted: %T, got: %T", synErr, err)
+			} else if want := `unexpected EOF`; synErr.Err.Error() != want {
+				t.Fatalf("wanted: %s, got: %s", want, synErr.Err)
+			}
+		}
+	})
 }
