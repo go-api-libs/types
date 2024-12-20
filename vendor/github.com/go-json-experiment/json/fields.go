@@ -49,6 +49,8 @@ type structField struct {
 	fieldOptions
 }
 
+var errNoExportedFields = errors.New("Go struct has no exported fields")
+
 func makeStructFields(root reflect.Type) (structFields, *SemanticError) {
 	// Setup a queue for a breath-first search.
 	var queueIndex int
@@ -221,8 +223,7 @@ func makeStructFields(root reflect.Type) (structFields, *SemanticError) {
 		// errors returned by errors.New would fail to serialize.
 		isEmptyStruct := t.NumField() == 0
 		if !isEmptyStruct && !hasAnyJSONTag && !hasAnyJSONField {
-			err := errors.New("Go struct has no exported fields")
-			return structFields{}, &SemanticError{GoType: t, Err: err}
+			return structFields{}, &SemanticError{GoType: t, Err: errNoExportedFields}
 		}
 	}
 
@@ -234,19 +235,11 @@ func makeStructFields(root reflect.Type) (structFields, *SemanticError) {
 	// or the one that is uniquely tagged with a JSON name.
 	// Otherwise, no dominant field exists for the set.
 	flattened := allFields[:0]
-	slices.SortFunc(allFields, func(x, y structField) int {
-		switch {
-		case x.name != y.name:
-			return strings.Compare(x.name, y.name)
-		case len(x.index) != len(y.index):
-			return cmp.Compare(len(x.index), len(y.index))
-		case x.hasName && !y.hasName:
-			return -1
-		case !x.hasName && y.hasName:
-			return +1
-		default:
-			return 0 // TODO(https://go.dev/issue/61643): Compare bools better.
-		}
+	slices.SortStableFunc(allFields, func(x, y structField) int {
+		return cmp.Or(
+			strings.Compare(x.name, y.name),
+			cmp.Compare(len(x.index), len(y.index)),
+			boolsCompare(!x.hasName, !y.hasName))
 	})
 	for len(allFields) > 0 {
 		n := 1 // number of fields with the same exact name
@@ -363,11 +356,11 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 		// of purely exported fields.
 		// See https://go.dev/issue/21357 and https://go.dev/issue/24153.
 		if sf.Anonymous {
-			err = firstError(err, fmt.Errorf("embedded Go struct field %s of an unexported type must be explicitly ignored with a `json:\"-\"` tag", sf.Type.Name()))
+			err = cmp.Or(err, fmt.Errorf("embedded Go struct field %s of an unexported type must be explicitly ignored with a `json:\"-\"` tag", sf.Type.Name()))
 		}
 		// Tag options specified on an unexported field suggests user error.
 		if hasTag {
-			err = firstError(err, fmt.Errorf("unexported Go struct field %s cannot have non-ignored `json:%q` tag", sf.Name, tag))
+			err = cmp.Or(err, fmt.Errorf("unexported Go struct field %s cannot have non-ignored `json:%q` tag", sf.Name, tag))
 		}
 		return fieldOptions{}, true, err
 	}
@@ -388,7 +381,7 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 			var err2 error
 			opt, n, err2 = consumeTagOption(tag)
 			if err2 != nil {
-				err = firstError(err, fmt.Errorf("Go struct field %s has malformed `json` tag: %v", sf.Name, err2))
+				err = cmp.Or(err, fmt.Errorf("Go struct field %s has malformed `json` tag: %v", sf.Name, err2))
 			}
 		}
 		out.hasName = true
@@ -404,11 +397,11 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 	for len(tag) > 0 {
 		// Consume comma delimiter.
 		if tag[0] != ',' {
-			err = firstError(err, fmt.Errorf("Go struct field %s has malformed `json` tag: invalid character %q before next option (expecting ',')", sf.Name, tag[0]))
+			err = cmp.Or(err, fmt.Errorf("Go struct field %s has malformed `json` tag: invalid character %q before next option (expecting ',')", sf.Name, tag[0]))
 		} else {
 			tag = tag[len(","):]
 			if len(tag) == 0 {
-				err = firstError(err, fmt.Errorf("Go struct field %s has malformed `json` tag: invalid trailing ',' character", sf.Name))
+				err = cmp.Or(err, fmt.Errorf("Go struct field %s has malformed `json` tag: invalid trailing ',' character", sf.Name))
 				break
 			}
 		}
@@ -416,15 +409,15 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 		// Consume and process the tag option.
 		opt, n, err2 := consumeTagOption(tag)
 		if err2 != nil {
-			err = firstError(err, fmt.Errorf("Go struct field %s has malformed `json` tag: %v", sf.Name, err2))
+			err = cmp.Or(err, fmt.Errorf("Go struct field %s has malformed `json` tag: %v", sf.Name, err2))
 		}
 		rawOpt := tag[:n]
 		tag = tag[n:]
 		switch {
 		case wasFormat:
-			err = firstError(err, fmt.Errorf("Go struct field %s has `format` tag option that was not specified last", sf.Name))
+			err = cmp.Or(err, fmt.Errorf("Go struct field %s has `format` tag option that was not specified last", sf.Name))
 		case strings.HasPrefix(rawOpt, "'") && strings.TrimFunc(opt, isLetterOrDigit) == "":
-			err = firstError(err, fmt.Errorf("Go struct field %s has unnecessarily quoted appearance of `%s` tag option; specify `%s` instead", sf.Name, rawOpt, opt))
+			err = cmp.Or(err, fmt.Errorf("Go struct field %s has unnecessarily quoted appearance of `%s` tag option; specify `%s` instead", sf.Name, rawOpt, opt))
 		}
 		switch opt {
 		case "nocase":
@@ -443,13 +436,13 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 			out.string = true
 		case "format":
 			if !strings.HasPrefix(tag, ":") {
-				err = firstError(err, fmt.Errorf("Go struct field %s is missing value for `format` tag option", sf.Name))
+				err = cmp.Or(err, fmt.Errorf("Go struct field %s is missing value for `format` tag option", sf.Name))
 				break
 			}
 			tag = tag[len(":"):]
 			opt, n, err2 := consumeTagOption(tag)
 			if err2 != nil {
-				err = firstError(err, fmt.Errorf("Go struct field %s has malformed value for `format` tag option: %v", sf.Name, err2))
+				err = cmp.Or(err, fmt.Errorf("Go struct field %s has malformed value for `format` tag option: %v", sf.Name, err2))
 				break
 			}
 			tag = tag[n:]
@@ -461,7 +454,7 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 			normOpt := strings.ReplaceAll(strings.ToLower(opt), "_", "")
 			switch normOpt {
 			case "nocase", "strictcase", "inline", "unknown", "omitzero", "omitempty", "string", "format":
-				err = firstError(err, fmt.Errorf("Go struct field %s has invalid appearance of `%s` tag option; specify `%s` instead", sf.Name, opt, normOpt))
+				err = cmp.Or(err, fmt.Errorf("Go struct field %s has invalid appearance of `%s` tag option; specify `%s` instead", sf.Name, opt, normOpt))
 			}
 
 			// NOTE: Everything else is ignored. This does not mean it is
@@ -472,9 +465,9 @@ func parseFieldOptions(sf reflect.StructField) (out fieldOptions, ignored bool, 
 		// Reject duplicates.
 		switch {
 		case out.casing == nocase|strictcase:
-			err = firstError(err, fmt.Errorf("Go struct field %s cannot have both `nocase` and `structcase` tag options", sf.Name))
+			err = cmp.Or(err, fmt.Errorf("Go struct field %s cannot have both `nocase` and `structcase` tag options", sf.Name))
 		case seenOpts[opt]:
-			err = firstError(err, fmt.Errorf("Go struct field %s has duplicate appearance of `%s` tag option", sf.Name, rawOpt))
+			err = cmp.Or(err, fmt.Errorf("Go struct field %s has duplicate appearance of `%s` tag option", sf.Name, rawOpt))
 		}
 		seenOpts[opt] = true
 	}
@@ -542,4 +535,16 @@ func consumeTagOption(in string) (string, int, error) {
 
 func isLetterOrDigit(r rune) bool {
 	return r == '_' || unicode.IsLetter(r) || unicode.IsNumber(r)
+}
+
+// boolsCompare compares x and y, ordering false before true.
+func boolsCompare(x, y bool) int {
+	switch {
+	case !x && y:
+		return -1
+	default:
+		return 0
+	case x && !y:
+		return +1
+	}
 }

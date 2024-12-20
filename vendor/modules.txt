@@ -1,4 +1,4 @@
-# github.com/go-json-experiment/json v0.0.0-20240815175050-ebd3a8989ca1
+# github.com/go-json-experiment/json v0.0.0-20241219182419-8aae9ab3641a
 ## explicit; go 1.23
 github.com/go-json-experiment/json
 github.com/go-json-experiment/json/internal
