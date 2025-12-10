@@ -1,8 +1,0 @@
-# github.com/go-json-experiment/json v0.0.0-20241219182419-8aae9ab3641a
-## explicit; go 1.23
-github.com/go-json-experiment/json
-github.com/go-json-experiment/json/internal
-github.com/go-json-experiment/json/internal/jsonflags
-github.com/go-json-experiment/json/internal/jsonopts
-github.com/go-json-experiment/json/internal/jsonwire
-github.com/go-json-experiment/json/jsontext

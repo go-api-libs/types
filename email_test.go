@@ -1,13 +1,13 @@
 package types_test
 
 import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"reflect"
 	"testing"
 
 	"github.com/go-api-libs/types"
-	"github.com/go-json-experiment/json"
-	"github.com/go-json-experiment/json/jsontext"
 )
 
 type wrapEmail struct {
