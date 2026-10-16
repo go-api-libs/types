@@ -1,0 +1,4 @@
+- **Standardized Types**: Tailored for API data interchange
+- **Validation**: Built-in validation rules to ensure data integrity before processing or transmission.
+- **JSON Marshalling/Unmarshalling**: Custom JSON handling for each type to handle special cases (e.g., ensuring email addresses are formatted correctly).
+- **Used Across go-api-libs**: These types are employed by all API libraries within the [go-api-libs](https://github.com/go-api-libs/) organization for consistency.
